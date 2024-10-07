@@ -8,7 +8,7 @@ from typing import List, Tuple
 from impacket.dcerpc.v5 import rpcrt, rrp, scmr
 from impacket.dcerpc.v5.dcom.oaut import VARIANT
 from impacket.dcerpc.v5.dcomrt import DCOMANSWER, DCOMCALL, IRemUnknown
-from impacket.dcerpc.v5.dtypes import DWORD, LONG, LPWSTR, PBYTE, ULONG, WSTR
+from impacket.dcerpc.v5.dtypes import BOOL, DWORD, LONG, LPWSTR, PBYTE, ULONG, WSTR
 from impacket.dcerpc.v5.ndr import NDRSTRUCT
 from impacket.dcerpc.v5.nrpc import checkNullString
 from impacket.dcerpc.v5.rpcrt import RPC_C_AUTHN_LEVEL_PKT_PRIVACY, DCERPCException
@@ -58,12 +58,40 @@ class CERTTRANSBLOB(NDRSTRUCT):
     )
 
 
+class ICertAdminD_SetExtension(DCOMCALL):
+    opnum = 3
+    structure = (
+        ("pwszAuthority", LPWSTR),
+        ("dwRequestId", DWORD),
+        ("pwszExtensionName", LPWSTR),
+        ("dwType", DWORD),
+        ("dwFlags", DWORD),
+        ("pctbValue", CERTTRANSBLOB),
+    )
+
+
+class ICertAdminD_SetExtensionResponse(DCOMANSWER):
+    structure = (("ErrorCode", ULONG),)
+
+
+class ICertAdminD_SetAttributes(DCOMCALL):
+    opnum = 4
+    structure = (
+        ("pwszAuthority", LPWSTR),
+        ("dwRequestId", DWORD),
+        ("pwszAttributes", LPWSTR),
+    )
+
+
+class ICertAdminD_SetAttributesResponse(DCOMANSWER):
+    structure = (("ErrorCode", ULONG),)
+
+
 class ICertAdminD_ResubmitRequest(DCOMCALL):
     opnum = 5
     structure = (
         ("pwszAuthority", LPWSTR),
         ("pdwRequestId", DWORD),
-        ("pwszExtensionName", LPWSTR),
     )
 
 
@@ -141,6 +169,31 @@ class ICertAdminD2_SetCASecurity(DCOMCALL):
 
 
 class ICertAdminD2_SetCASecurityResponse(DCOMANSWER):
+    structure = (("ErrorCode", LONG),)
+
+
+class ICertAdminD2_GetOfficerRights(DCOMCALL):
+    opnum = 42
+    structure = (("pwszAuthority", LPWSTR),)
+
+
+class ICertAdminD2_GetOfficerRightsResponse(DCOMANSWER):
+    structure = (
+        ("pfEnabled", BOOL),
+        ("pctbSD", CERTTRANSBLOB),
+    )
+
+
+class ICertAdminD2_SetOfficerRights(DCOMCALL):
+    opnum = 43
+    structure = (
+        ("pwszAuthority", LPWSTR),
+        ("fEnable", BOOL),
+        ("pctbSD", CERTTRANSBLOB),
+    )
+
+
+class ICertAdminD2_SetOfficerRightsResponse(DCOMANSWER):
     structure = (("ErrorCode", LONG),)
 
 
@@ -358,6 +411,9 @@ class CA:
         return exchange_cert
 
     def get_config_csra(self) -> Tuple[int, int, int, CASecurity]:
+        from IPython import embed
+        embed()
+        # RequestDisposition
         request = ICertAdminD2_GetConfigEntry()
         request["pwszAuthority"] = checkNullString(self.ca)
         request["pwszNodePath"] = checkNullString(
@@ -369,12 +425,15 @@ class CA:
 
         request_disposition = resp["pVariant"]["_varUnion"]["lVal"]
 
+
+        # EditFlags (UserSpecifiesSanEnabled)
         request["pwszEntry"] = checkNullString("EditFlags")
 
         resp = self.cert_admin2.request(request)
 
         edit_flags = resp["pVariant"]["_varUnion"]["lVal"]
 
+        # InterfaceFlags (IF_ENFORCEENCRYPTICERTREQUEST)
         request["pwszNodePath"] = checkNullString("")
         request["pwszEntry"] = checkNullString("InterfaceFlags")
 
@@ -382,12 +441,44 @@ class CA:
 
         interface_flags = resp["pVariant"]["_varUnion"]["lVal"]
 
+        # CA Security
         request = ICertAdminD2_GetCASecurity()
         request["pwszAuthority"] = checkNullString(self.ca)
 
         resp = self.cert_admin2.request(request)
 
         security = CASecurity(b"".join(resp["pctbSD"]["pb"]))
+
+        # EnrollmentAgentRights
+        request = ICertAdminD2_GetOfficerRights()
+        request["pwszAuthority"] = checkNullString(self.ca)
+
+        resp = self.cert_admin2.request(request)
+        print(resp['pfEnabled'])
+        print(resp['pctbSD']["pb"])
+
+        import struct
+        if resp['pfEnabled']:
+            # Grab officerRights
+            # stub
+            # EnrollmentRights
+            1
+        else:
+            print(struct.unpack('<i', b''.join(resp['pctbSD']['pb'][:4]))[0])
+            print(b"".join(resp['pctbSD']["pb"][4:]))
+
+        from IPython import embed
+        embed()
+
+        request = ICertAdminD2_SetOfficerRights()
+        request["pwszAuthority"] = checkNullString(self.ca)
+        request["fEnable"] = 65535  # -65536 #4294901760
+
+        sd = b"".join(resp['pctbSD']["pb"][4:]) + b'\x00' * 4
+        request["pctbSD"]["cb"] = len(sd)
+        request["pctbSD"]["pb"] = sd
+        resp = self.cert_admin2.request(request)
+
 
         return (edit_flags, request_disposition, interface_flags, security)
 
@@ -508,7 +599,7 @@ class CA:
             )
             return False
 
-        request = ICertAdminD_ResubmitRequest()
+        request = ICertAdminD_DenyRequest()
         request["pwszAuthority"] = checkNullString(self.ca)
         request["pdwRequestId"] = int(self.request_id)
 
@@ -522,9 +613,9 @@ class CA:
                 return False
             raise
 
-        error_code = resp["pdwDisposition"]
+        error_code = resp["ErrorCode"]
 
-        if error_code == 3:
+        if error_code == 0:
             logging.info("Successfully denied certificate request")
         else:
             error_msg = translate_error_code(error_code)
