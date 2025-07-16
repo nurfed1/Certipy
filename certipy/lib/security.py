@@ -24,6 +24,7 @@ from certipy.lib.constants import (
 )
 
 # Access Control Entry flags
+INHERIT_ONLY_ACE = 0x08
 INHERITED_ACE = 0x10
 
 SE_DACL_PRESENT = 0x0004
@@ -82,6 +83,9 @@ class ActiveDirectorySecurity(SecurityDescriptorParser):
         # TODO: Handle DENIED ACEs
 
         for ace in aces:
+            if ace["AceFlags"] & INHERIT_ONLY_ACE:
+                continue
+
             sid = format_sid(ace["Ace"]["Sid"].getData())
 
             # Initialize entry for this SID if not already present
