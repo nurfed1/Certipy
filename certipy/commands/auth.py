@@ -678,14 +678,7 @@ class Authenticate:
         # Derive encryption key
         etype = as_rep["enc-part"]["etype"]
         cipher = _enctype_table[etype]
-
-        if etype == EncType.AES256:
-            t_key = truncate_key(full_key, 32)
-        elif etype == EncType.AES128:
-            t_key = truncate_key(full_key, 16)
-        else:
-            logging.error("Unexpected encryption type in AS_REP")
-            return False
+        t_key = truncate_key(full_key, cipher.keysize)
 
         # Decrypt AS-REP
         key = Key(cipher.enctype, t_key)
@@ -807,7 +800,17 @@ class Authenticate:
                 seq_set_iter(
                     req_body,
                     "etype",
-                    (int(cipher.enctype), e2i(constants.EncryptionTypes.rc4_hmac)),
+                    # (int(cipher.enctype), e2i(constants.EncryptionTypes.rc4_hmac)),
+                    # (int(cipher.enctype),),
+                    (
+                        EncType.AES256, # 18
+                        EncType.AES128, # 17
+                        EncType.RC4,     # 23
+                        EncType.DES_MD5, # 3
+                        EncType.DES_CRC, # 1
+                        24,
+                        -135
+                    ),
                 )
 
                 # Include our own ticket
@@ -825,7 +828,7 @@ class Authenticate:
                 plaintext = new_cipher.decrypt(session_key, 2, ciphertext)
 
                 # Create special key using the t_key
-                special_key = Key(18, t_key)
+                special_key = Key(new_cipher.enctype, t_key)
 
                 # Extract PAC from ticket
                 data = plaintext

@@ -258,7 +258,14 @@ def build_pkinit_as_req(
         "till": (now + datetime.timedelta(days=1)).replace(microsecond=0),
         "rtime": (now + datetime.timedelta(days=1)).replace(microsecond=0),
         "nonce": getrandbits(31),
-        "etype": [EncType.AES256, EncType.AES128],  # Prefer stronger ciphers
+        "etype": [
+            12,
+            15,
+            EncType.AES256,  # 18
+            EncType.AES128,  # 17
+            EncType.RC4,     # 23
+            EncType.DES_MD5, # 3
+        ],
     }
 
     kdc_req_body = KdcReqBody(kdc_req_body_data)
